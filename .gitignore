@@ -14,3 +14,4 @@ vignettes/*.pdf
 
 # Suppress data directory
 data/*
+submission/*

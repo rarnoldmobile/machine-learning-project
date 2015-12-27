@@ -1,0 +1,119 @@
+Quantified Self Movement Analysis
+=================================
+
+
+Required Libraries
+------------------
+```{r library_load, results='hide'}
+library(ggplot2)
+library(caret)
+```
+
+```{r set_wd, results='hide', echo=FALSE}
+setwd("~/Projects/machine-learning-project")
+```
+
+Data Processing
+---------------
+The raw dataset was split into an 70/30 training/testing dataset.
+Our final validation datset is only 20 entries, and will be used for a wrap-up summarization.
+```{r data_processing1, cache=TRUE}
+raw_data <- read.csv("./data/pml-training.csv")
+final_validation <- read.csv("./data/pml-testing.csv")
+
+set.seed(343434)
+inTrain <- createDataPartition(raw_data$classe, p=.7, list=FALSE)
+training <- raw_data[inTrain,]
+testing <- raw_data[-inTrain,]
+```
+
+
+Exploration
+-----------
+We need to explore some critical elements to our data.
+```{r data_exploration0, results='hide'}
+summary(training)
+```
+
+Most Importantly - our observations must be well represented across all classe groups.
+
+```{r data_exploration1, results='hide'}
+classePlot <- qplot(training$classe, fill=training$classe)
+classePlot + labs(title="Observation Counts By Classe") + xlab("Classe") 
+```
+
+
+
+Feature Selection
+-----------------
+As we have seen in our data exploration step, there are many values populated by NA's.  There is also a general concern of features not offering enough variance.  Our final step will be removing features that have no relation to our analysis.
+```{r preproces, results='hide', cache=TRUE}
+# Remove Near Zero Variance data
+nzv <- nearZeroVar(training)
+training.filtered <- training[, -nzv]
+
+most_pop<-apply(!is.na(training.filtered),2,sum)>(nrow(training.filtered) * .95)
+training.filtered<-training.filtered[,most_pop]
+
+# remove columns that are not related directly to sensors
+training.filtered <- training.filtered[, -(1:5)]
+```
+
+Results:  
+*  Near Zero Variance test reduced features from 160 to 108  
+*  NA column removal (95% threshold) reduced features from 108 to 59  
+*  Non Applicable column removal took us from 59 columns to 54  
+
+```{r columns_note}
+#The columns removed as they did not apply were
+names(training[,1:5])
+```
+
+Model Creation
+--------------
+```{r model_creation, cache=TRUE, results='hide'}
+set.seed(123123)
+trainCtl <- trainControl(
+              method="cv"
+              , number=5
+              , classProbs = TRUE
+            )
+
+dtreeModel  <- train(classe ~ ., data=training.filtered, method="rpart", trControl=trainCtl)
+gbmModel    <- train(classe ~ ., data=training.filtered, method="gbm", trControl=trainCtl)
+```
+
+We start off model creation by performing 2 different methodologies: a decision tree, and a generalized boosted model.
+
+Our cross validation methodology will use k-fold methodology, setting the value of k to 5.
+
+
+```{r validation_set, results='hide', cache=TRUE, out.extra='none'}
+gbm.predictions <- predict(gbmModel, newdata=testing)
+dtree.predictions <- predict(dtreeModel, newdata=testing)
+gbm.results <- confusionMatrix(testing$classe, gbm.predictions)
+dtree.results <- confusionMatrix(testing$classe, dtree.predictions)
+```
+
+Our GBM model accuracy was `r (round(gbm.results[3]$overall[1][[1]], 4) * 100)`%.
+Our decision tree model accuracy was `r (round(dtree.results[3]$overall[1][[1]], 4) * 100)`%.
+
+The GBM is the clear winner of these two.  Diving further into the performance - the lower bounds of accuracy for our 95% Confidence Interval is `r (round(gbm.results[3]$overall[3][[1]], 4) * 100)`%, and an upper bound of `r (round(gbm.results[3]$overall[4][[1]], 4) * 100)`%.
+
+For out of sample errors, we can be confident in our prediction being 98% accurate.
+
+
+Variable Importance
+-------------------
+Now that we have a model, diving into variable importance to see what our highest predictors offered us:
+```{r variable_importance}
+varImp(gbmModel)
+```
+
+Roll Belt was the most important variable, along with num window.  Let's visualize those quickly:
+```{r visualize_variables}
+roll_belt_plot <- qplot(x=roll_belt, y=num_window, data=training.filtered, colour=classe, fill=classe)
+roll_belt_plot + labs(title="Roll Belt By Classe") + xlab("Roll Belt") + ylab("Num Window")
+```
+
+And interestingly, we can see distinctive groupings appear, and only minimal overlap between different classes.
